@@ -69,6 +69,29 @@ impl PhotocraftApp {
         self.open_bytes_placed(name, bytes, path, None, None)
     }
 
+    /// Open a file sent by the page that hosts the web app (`craft-web-host`'s `open` message,
+    /// through the web shell): [`Self::open_bytes`], with `name` kept as the document's file when
+    /// File › Save can write that file back in place. That is a layered document (PSD, PSB,
+    /// .pcraft, OpenRaster), or a flat picture in a format PhotoCraft writes whose file holds
+    /// nothing a flat save leaves out. Save then hands it back to the page under the same name
+    /// and format, as it writes back to a file opened from disk.
+    ///
+    /// Any other file opens without a file, and its first Save is a new one. The web's Save has no
+    /// dialog to ask in, so a name kept for an animation, a multi-page TIFF or an icon's sizes would
+    /// be written over by the one image that opened, without a question; and Camera Raw keeps a
+    /// raw's bytes to develop from only when there is no path to read them from again.
+    pub fn open_from_host(&mut self, name: &str, bytes: &[u8]) -> Result<Vec<String>, String> {
+        let flat = || {
+            photocraft_engine::file_cmds::extension(name)
+                .and_then(|ext| photocraft_formats::from_extension(&ext))
+                .and_then(photocraft_formats::Format::raster_codec)
+                .is_some_and(|codec| codec.caps().write)
+                && matches!(photocraft_codecs::has_unretained_source_data(bytes), Ok(false))
+        };
+        let own = photocraft_engine::file_cmds::saves_in_place(name) || flat();
+        self.open_bytes_from(name, bytes, own.then_some(name))
+    }
+
     /// [`Self::open_bytes_from`] for a file dropped on a tab slot (`slot`) or opened as one of a
     /// set (`order`): both survive the inline decode, a memory prompt and the final placement.
     pub(crate) fn open_bytes_placed(

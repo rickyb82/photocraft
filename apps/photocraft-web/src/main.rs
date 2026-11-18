@@ -8,21 +8,40 @@
 //! - no TCP control server (browsers can't listen on sockets);
 //! - file pickers return browser file contents asynchronously through `Services::file_dialog`;
 //!   this includes File → Open and commands such as Place Embedded;
-//! - saving/exporting triggers a browser download;
+//! - saving/exporting triggers a browser download (or goes to a page that hosts the app, below);
 //! - dropped files are read asynchronously by `web::WebShell` and delivered through `Services::inbox`.
 //!
-//! URL query flags: `?cpu` forces the CPU canvas path (same as `PHOTOCRAFT_CPU_CANVAS=1`);
+//! URL query flags, each a whole parameter of the query (`query`), so a name a page puts beside
+//! them switches none on: `?cpu` forces the CPU canvas path (same as `PHOTOCRAFT_CPU_CANVAS=1`);
 //! `?webgl` forces the WebGL2 backend instead of WebGPU; `?free-mb=N` pretends only N MiB can be
 //! allocated, so the memory gates and the low-memory warning can be seen without gigabytes of
 //! images (diagnostics only).
+//!
+//! `?lang=<code>` (`it`, `pt-BR`, ...) shows the interface in that language when the build has its
+//! catalog, and is ignored otherwise. It is kept as the Preferences › Interface choice, which is
+//! where the interface reads its language from; without it the browser build starts in English.
+//!
+//! `?host=parent` (inside an `<iframe>`) talks to a same-origin parent page instead of
+//! downloading: the page sends the file to open and keeps the documents and pictures PhotoCraft
+//! saves (`host`). A page can also host PhotoCraft in its own document (no iframe) with
+//! `data-host="page"` on the canvas, talking over DOM `CustomEvent`s on the canvas.
 
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
 #[cfg(any(target_arch = "wasm32", test))]
 mod diagnostics;
 
+#[cfg(target_arch = "wasm32")]
+mod host;
+
+#[cfg(any(target_arch = "wasm32", test))]
+mod host_files;
+
 #[cfg(any(target_arch = "wasm32", test))]
 mod preset_bridge;
+
+#[cfg(any(target_arch = "wasm32", test))]
+mod query;
 
 #[cfg(target_arch = "wasm32")]
 mod indexed_presets;

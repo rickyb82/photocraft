@@ -72,6 +72,9 @@ craft-crs = { git = "https://github.com/storytold/craft-libs", rev = "fe6b443acf
 # catalogs that `crates/ui-egui/build.rs` embeds from `CRAFT_I18N_DIR` (storytold/craft-i18n, at
 # the commit in `craft-i18n.rev`). Already in the tree through craft-ui.
 craft-i18n = { git = "https://github.com/storytold/craft-libs", rev = "fe6b443acf3eccaf514064812e6e6bf24257652a" }
+# The host messages between a Craft app's web build and the page that hosts it: the browser app
+# opens the page's files and hands it what it saves (`apps/photocraft-web/src/host.rs`).
+craft-web-host = { git = "https://github.com/storytold/craft-libs", rev = "fe6b443acf3eccaf514064812e6e6bf24257652a" }
 # craft-update: app-specific pretend versions apply to startup and manual checks.
 craft-update = { git = "https://github.com/storytold/craft-libs", version = "=0.1.0", rev = "fe6b443acf3eccaf514064812e6e6bf24257652a", features = ["egui"] }
 thiserror = "2"

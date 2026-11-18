@@ -25,6 +25,9 @@ photocraft-codecs = { workspace = true }
 photocraft-doc = { workspace = true }
 photocraft-ui-egui = { workspace = true }
 photocraft-raster = { workspace = true }
+# Which files are documents or pictures (they go to a hosting page; `src/host_files.rs`); already
+# linked through photocraft-io.
+photocraft-formats = { workspace = true }
 egui = { workspace = true }
 log = { workspace = true }
 serde_json = { workspace = true }
@@ -32,6 +35,8 @@ serde_json = { workspace = true }
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 # `wgpu` pulls egui-wgpu's defaults: WebGPU plus the WebGL2 fallback.
 eframe = { workspace = true, features = ["wgpu", "accesskit", "clipboard"] }
+# The host messages (storytold/craft-libs): one contract and one bridge for the web builds.
+craft-web-host = { workspace = true }
 rfd = { workspace = true }
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
