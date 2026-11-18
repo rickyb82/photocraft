@@ -60,15 +60,28 @@ pub fn start() {
             log::error!("missing <canvas id=\"{CANVAS_ID}\">");
             return;
         };
+        // Host modes (`craft-web-host`): `?host=parent`, a same-origin page framing PhotoCraft, opens
+        // files in it and keeps what it saves (`host`); unframed there is no parent, so that URL on
+        // its own stays the normal app with downloads. `data-host="page"` on the canvas opts a
+        // page in instead: it runs PhotoCraft in its own document and talks over DOM
+        // `CustomEvent`s on the canvas.
+        let bridge = crate::host::Bridge::detect(&canvas);
+        let app_bridge = bridge.clone();
+        // Flags are whole parameters (`query`): a framing page puts names in the same query.
         let q = query();
-        let force_cpu = q.contains("cpu");
+        if bridge.is_none() && crate::query::value(&q, "host") == Some("parent") {
+            log::warn!("?host=parent needs a framing page on the same origin; saves download instead");
+        }
+        let force_cpu = crate::query::has(&q, "cpu");
         // `?free-mb=N`: the memory gates and the low-memory warning see only N MiB (diagnostics).
         if let Some(mb) = crate::diagnostics::free_mb(&q) {
             photocraft_raster::headroom::simulate_available(Some(crate::diagnostics::free_bytes(mb)));
         }
+        // `?lang=<code>`: the language the page asks the interface in, when PhotoCraft has it.
+        let url_language = crate::query::lang(&q).and_then(i18n::lang_from_tag).map(i18n::Lang::code);
         let mut options = eframe::WebOptions::default();
         photocraft_ui_egui::gpu_canvas::use_adapter_limits(&mut options.wgpu_options.wgpu_setup);
-        if q.contains("webgl")
+        if crate::query::has(&q, "webgl")
             && let eframe::egui_wgpu::WgpuSetup::CreateNew(create) = &mut options.wgpu_options.wgpu_setup
         {
             create.instance_descriptor.backends = eframe::wgpu::Backends::GL;
@@ -106,9 +119,20 @@ pub fn start() {
                     preset_warnings.extend(warnings);
                     let drag = listen_drag(&pen_target);
                     let mut services = services(inbox.clone(), place_inbox.clone(), drag_pos_service(pen_target.clone(), drag));
+                    if let Some(bridge) = &app_bridge {
+                        bridge.connect(&mut services, cc.egui_ctx.clone());
+                    }
                     let mut initial = Some(load_initial_preferences(&presets, database.is_some() && !session.actions.list.is_empty()));
                     services.load_prefs = Some(Box::new(move || initial.take().unwrap_or_else(stored_preferences)));
                     let mut app = PhotocraftApp::new(session, services);
+                    // The interface reads its language from the preferences, so the page's choice
+                    // is kept there, as one made in Preferences › Interface is. On the web
+                    // Automatic is English, whatever the browser's language.
+                    if let Some(code) = url_language
+                        && app.session.prefs().interface.language != code
+                    {
+                        app.session.edit_prefs(|prefs| prefs.interface.language = code.to_owned());
+                    }
                     if !preset_warnings.is_empty() {
                         photocraft_ui_egui::notices::post(&mut app, i18n::t("Some brush presets could not be loaded"), preset_warnings, true, None);
                     }
@@ -121,7 +145,10 @@ pub fn start() {
                         app.set_wgpu(rs);
                     }
                     let unsaved = Arc::new(AtomicBool::new(false));
-                    guard_unload(unsaved.clone());
+                    // A host hears of unsaved changes and guards leaving the page itself.
+                    if app_bridge.is_none() {
+                        guard_unload(unsaved.clone());
+                    }
                     Ok(Box::new(WebShell {
                         app,
                         inbox,
@@ -133,10 +160,18 @@ pub fn start() {
                         ui_language: "",
                         actions_revision,
                         prefs_revision: None,
+                        bridge: app_bridge,
                     }))
                 }),
             )
             .await;
+        // Ready only once the runner is up: starting can still fail after the app is made.
+        if let Some(bridge) = &bridge {
+            match &result {
+                Ok(()) => bridge.post_ready(),
+                Err(e) => bridge.post_failed(&format!("the app failed to start: {e:?}")),
+            }
+        }
         if let Some(el) = document.get_element_by_id("photocraft_loading") {
             match result {
                 Ok(()) => el.remove(),
@@ -372,6 +407,9 @@ struct WebShell {
     prefs_revision: Option<u64>,
     /// The interface language whose served script font was last asked for.
     ui_language: &'static str,
+    /// The page that hosts the app and keeps its files (`?host=parent`, or `data-host="page"` on
+    /// the canvas), if there is one.
+    bridge: Option<crate::host::Bridge>,
 }
 
 impl WebShell {
@@ -403,6 +441,15 @@ impl WebShell {
             });
         }
         self.unsaved.store(self.app.has_unsaved_work() || self.presets.unsaved(), Ordering::Relaxed);
+    }
+
+    /// Tells the host, if there is one, whether a document has unsaved changes: after the logic
+    /// pass, where commands and saves run, and after the interface pass, where tools edit. It is
+    /// the documents' state alone: presets are kept in the browser and never go to the host.
+    fn report_dirty(&self) {
+        if let Some(bridge) = &self.bridge {
+            bridge.report_dirty(&self.app);
+        }
     }
 
     /// Fetches the served families asked for (picked in a font menu, or needed by a layout) and
@@ -495,8 +542,13 @@ impl eframe::App for WebShell {
             });
         }
         self.serve_fonts(ctx);
+        // The files the host sent open first, like the dropped ones the app takes from its inbox.
+        if let Some(bridge) = &self.bridge {
+            bridge.open_files(&mut self.app);
+        }
         self.app.logic_frame(ctx, frame);
         self.save_presets(ctx);
+        self.report_dirty();
         self.app.finish_type_reset_logic(ctx);
     }
 
@@ -545,6 +597,7 @@ impl eframe::App for WebShell {
         }
         self.app.ui_frame(ui, frame);
         self.save_presets(ui.ctx());
+        self.report_dirty();
         self.app.finish_type_reset_pass(ui.ctx());
     }
 }
